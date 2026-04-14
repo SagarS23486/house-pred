@@ -1,72 +1,62 @@
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-data = pd.read_csv("Housing.csv")
 
-# show first rows
-print(data.head())
-# select features
-X = data[['area', 'bedrooms', 'bathrooms', 'stories', 'parking']]
+# load dataset
+data = pd.read_csv("Bengaluru_House_Data.csv")
+data.columns = data.columns.str.lower()
 
-# target variable
-y = data['price']
+# rename columns
+data.rename(columns={
+    'total_sqft': 'area',
+    'bath': 'bathrooms',
+    'bhk': 'bedrooms'
+}, inplace=True)
 
-print(X.head())
-print(y.head())
+# extract bedrooms if size exists
+if 'size' in data.columns:
+    data['bedrooms'] = data['size'].str.extract(r'(\d+)')
+    data['bedrooms'] = pd.to_numeric(data['bedrooms'], errors='coerce')
+    data.drop('size', axis=1, inplace=True)
 
-from sklearn.model_selection import train_test_split
+# clean area
+def convert_sqft(x):
+    try:
+        x = str(x)
+        if '-' in x:
+            a, b = x.split('-')
+            return (float(a) + float(b)) / 2
+        return float(x)
+    except (ValueError, TypeError):
+        return None
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+data['area'] = data['area'].apply(convert_sqft)
 
-print("Training data:", X_train.shape)
-print("Testing data:", X_test.shape)
-# 1️⃣ Correlation Heatmap
-corr = data.corr(numeric_only=True)
+# clean location
+data['location'] = data['location'].astype(str).str.strip()
+data = data[data['location'] != 'nan']
 
-plt.figure(figsize=(10,6))
-sns.heatmap(corr, annot=True, cmap="coolwarm")
-plt.title("Correlation Heatmap")
-plt.show()
+# keep top locations
+top_locations = data['location'].value_counts().head(50).index
+data = data[data['location'].isin(top_locations)]
 
+# convert numeric
+for col in ['area', 'bedrooms', 'bathrooms', 'price']:
+    data[col] = pd.to_numeric(data[col], errors='coerce')
 
-# 2️⃣ Area vs Price Scatter Plot
-plt.scatter(data['area'], data['price'])
-plt.xlabel("Area")
-plt.ylabel("Price")
-plt.title("Area vs Price")
-plt.show()
+# keep only required columns
+data = data[['area', 'bedrooms', 'bathrooms', 'location', 'price']]
 
+# drop nulls
+data = data.dropna()
 
+# remove outliers based on price per sqft
+data['price_per_sqft'] = data['price'] * 100000 / data['area']
+data = data[(data['price_per_sqft'] >= 500) & (data['price_per_sqft'] <= 100000)]
+data.drop('price_per_sqft', axis=1, inplace=True)
 
-# 3️⃣ Bedrooms vs Price Graph
-sns.barplot(x='bedrooms', y='price', data=data)
-plt.title("Bedrooms vs Price")
-plt.show()
-# create model
-model = LinearRegression()
+# remove unrealistic bedroom/bathroom counts
+data = data[(data['bedrooms'] <= 10) & (data['bathrooms'] <= 10)]
 
-# train model
-model.fit(X_train, y_train)
+# save clean data
+data.to_csv("cleaned_housing.csv", index=False)
 
-print("Model trained successfully")
-# predict prices
-predictions = model.predict(X_test)
-
-print(predictions[:5])
-comparison = pd.DataFrame({
-    'Actual Price': y_test,
-    'Predicted Price': predictions
-})
-
-print(comparison.head())
-mae = mean_absolute_error(y_test, predictions)
-mse = mean_squared_error(y_test, predictions)
-r2 = r2_score(y_test, predictions)
-
-print("Mean Absolute Error:", mae)
-print("Mean Squared Error:", mse)
-print("R2 Score:", r2)
+print("✅ cleaned_housing.csv ready")
